@@ -14,22 +14,18 @@ GORGIAS_EMAIL = os.environ.get("GORGIAS_EMAIL")
 GORGIAS_API_KEY = os.environ.get("GORGIAS_API_KEY")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 
-ALLOWED_EVENTS = {"ticket-created", "ticket-message-created"}
 MAX_MACROS = 20
 MACRO_BODY_LIMIT = 200
 MESSAGE_CHAR_LIMIT = 500
 
-
 def gorgias_auth():
     return HTTPBasicAuth(GORGIAS_EMAIL, GORGIAS_API_KEY)
-
 
 def fetch_ticket(ticket_id):
     url = f"https://{GORGIAS_DOMAIN}/api/tickets/{ticket_id}"
     resp = requests.get(url, auth=gorgias_auth(), timeout=10)
     resp.raise_for_status()
     return resp.json()
-
 
 def fetch_macros():
     url = f"https://{GORGIAS_DOMAIN}/api/macros"
@@ -47,7 +43,6 @@ def fetch_macros():
         result.append({"id": m["id"], "name": m.get("name", ""), "body": body})
     return result
 
-
 def extract_customer_message(ticket):
     messages = ticket.get("messages", [])
     for msg in messages:
@@ -59,12 +54,10 @@ def extract_customer_message(ticket):
     subject = ticket.get("subject", "")
     return subject[:MESSAGE_CHAR_LIMIT] if subject else ""
 
-
 def build_prompt(ticket, macros, customer_message):
     macro_lines = "\n".join(
         f"- [{m['id']}] {m['name']}: {m['body']}" for m in macros
     ) or "No macros available."
-
     return f"""You are a customer support assistant. Analyze the following support ticket and respond in exactly this format:
 
 SUMMARY: <one sentence describing the customer's issue>
@@ -82,7 +75,6 @@ Available macros:
 
 Respond only in the format above. Do not add extra commentary."""
 
-
 def parse_claude_response(text):
     lines = {}
     for line in text.strip().splitlines():
@@ -91,85 +83,70 @@ def parse_claude_response(text):
             lines[key.strip()] = value.strip()
     return lines
 
-
 def format_internal_note(parsed):
     summary = parsed.get("SUMMARY", "N/A")
     category = parsed.get("CATEGORY", "N/A")
     urgency = parsed.get("URGENCY", "N/A")
     macro = parsed.get("BEST_MACRO", "none")
     draft = parsed.get("DRAFT_RESPONSE", "N/A")
-
     return (
-        f"🤖 **Claude Analysis**\n\n"
-        f"**Summary:** {summary}\n"
-        f"**Category:** {category}\n"
-        f"**Urgency:** {urgency}\n"
-        f"**Best Macro:** {macro}\n\n"
-        f"**Draft Response:**\n{draft}"
+        f"🤖 Claude Analysis\n\n"
+        f"Summary: {summary}\n"
+        f"Category: {category}\n"
+        f"Urgency: {urgency}\n"
+        f"Best Macro: {macro}\n\n"
+        f"Draft Response:\n{draft}"
     )
-
 
 def post_internal_note(ticket_id, body):
     url = f"https://{GORGIAS_DOMAIN}/api/tickets/{ticket_id}/messages"
     payload = {
         "channel": "internal-note",
-        "body_html": body.replace("\n", "<br>").replace("**", ""),
         "body_text": body,
     }
     resp = requests.post(url, json=payload, auth=gorgias_auth(), timeout=10)
     resp.raise_for_status()
     return resp.json()
 
-
 def analyze_ticket(ticket_id):
     ticket = fetch_ticket(ticket_id)
     customer_message = extract_customer_message(ticket)
-
     if not customer_message:
         logger.info("Ticket %s has no customer message yet, skipping.", ticket_id)
         return
-
     macros = fetch_macros()
-
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     prompt = build_prompt(ticket, macros, customer_message)
-
     message = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=400,
         messages=[{"role": "user", "content": prompt}],
     )
-
     raw_text = message.content[0].text
     parsed = parse_claude_response(raw_text)
     note_body = format_internal_note(parsed)
-
     post_internal_note(ticket_id, note_body)
     logger.info("Posted Claude analysis note to ticket %s.", ticket_id)
-
 
 @app.route("/", methods=["GET"])
 def health_check():
     return jsonify({"status": "ok", "service": "gorgias-claude-webhook"}), 200
 
-
 @app.route("/webhook/gorgias", methods=["POST"])
 def gorgias_webhook():
     try:
         payload = request.get_json(silent=True) or {}
-        event_type = payload.get("event", {}).get("type") or payload.get("type", "")
 
-        if event_type not in ALLOWED_EVENTS:
-            logger.info("Ignoring event type: %s", event_type)
-            return jsonify({"status": "ignored"}), 200
-
-        # Support both payload shapes Gorgias may send
-        ticket_data = payload.get("data", {}).get("ticket") or payload.get("ticket", {})
-        ticket_id = ticket_data.get("id")
+        # Handle Gorgias sending just a ticket_id directly
+        ticket_id = (
+            payload.get("ticket_id") or
+            (payload.get("data", {}).get("ticket") or {}).get("id") or
+            (payload.get("ticket") or {}).get("id")
+        )
 
         if not ticket_id:
-            logger.warning("No ticket ID found in payload.")
-            return jsonify({"status": "no ticket id"}), 200
+            logger.info("No ticket ID found, ignoring.")
+            return jsonify({"status": "ignored"}), 200
 
         # Skip if the triggering message is already an internal note (avoid loops)
         message_data = payload.get("data", {}).get("message") or payload.get("message", {})
@@ -180,11 +157,9 @@ def gorgias_webhook():
         analyze_ticket(ticket_id)
 
     except Exception as e:
-        # Always return 200 so Gorgias doesn't retry endlessly
         logger.error("Error processing webhook: %s", e, exc_info=True)
 
     return jsonify({"status": "ok"}), 200
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
