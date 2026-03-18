@@ -103,6 +103,14 @@ def post_internal_note(ticket_id, body):
     payload = {
         "channel": "internal-note",
         "body_text": body,
+        "body_html": body.replace("\n", "<br>"),
+        "via": "internal-note",
+        "source": {
+            "type": "internal-note",
+            "from": {
+                "address": GORGIAS_EMAIL
+            }
+        }
     }
     resp = requests.post(url, json=payload, auth=gorgias_auth(), timeout=10)
     resp.raise_for_status()
