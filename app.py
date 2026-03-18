@@ -52,21 +52,25 @@ def fetch_macros():
 def fetch_tickets_for_report(limit=500):
     url = f"https://broyaliving.gorgias.com/api/tickets"
     all_tickets = []
-    page = 1
+    cursor = None
+
     while len(all_tickets) < limit:
-        resp = requests.get(url, auth=gorgias_auth(), params={
-            "limit": min(100, limit - len(all_tickets)),
-            "page": page,
-        }, timeout=30)
+        params = {"limit": 100}
+        if cursor:
+            params["cursor"] = cursor
+
+        resp = requests.get(url, auth=gorgias_auth(), params=params, timeout=30)
         resp.raise_for_status()
         data = resp.json()
         tickets = data.get("data", [])
         if not tickets:
             break
         all_tickets.extend(tickets)
-        page += 1
-        if len(tickets) < 100:
+
+        cursor = data.get("meta", {}).get("next_cursor")
+        if not cursor:
             break
+
     return all_tickets[:limit]
 
 def extract_customer_message(ticket):
