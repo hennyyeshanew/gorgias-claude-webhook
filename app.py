@@ -22,13 +22,13 @@ def gorgias_auth():
     return HTTPBasicAuth(GORGIAS_EMAIL, GORGIAS_API_KEY)
 
 def fetch_ticket(ticket_id):
-    url = f"https://{GORGIAS_DOMAIN}/api/tickets/{ticket_id}"
+    url = f"https://broyaliving.gorgias.com/api/tickets/{ticket_id}"
     resp = requests.get(url, auth=gorgias_auth(), timeout=10)
     resp.raise_for_status()
     return resp.json()
 
 def fetch_macros():
-    url = f"https://{GORGIAS_DOMAIN}/api/macros"
+    url = f"https://broyaliving.gorgias.com/api/macros"
     resp = requests.get(url, auth=gorgias_auth(), params={"limit": MAX_MACROS}, timeout=10)
     resp.raise_for_status()
     data = resp.json()
@@ -99,7 +99,7 @@ def format_internal_note(parsed):
     )
 
 def post_internal_note(ticket_id, body):
-    url = f"https://{GORGIAS_DOMAIN}/api/tickets/{ticket_id}/messages"
+    url = f"https://broyaliving.gorgias.com/api/tickets/{ticket_id}/messages"
     payload = {
         "channel": "internal-note",
         "body_text": body,
@@ -137,7 +137,6 @@ def gorgias_webhook():
     try:
         payload = request.get_json(silent=True) or {}
 
-        # Handle Gorgias sending just a ticket_id directly
         ticket_id = (
             payload.get("ticket_id") or
             (payload.get("data", {}).get("ticket") or {}).get("id") or
@@ -148,7 +147,6 @@ def gorgias_webhook():
             logger.info("No ticket ID found, ignoring.")
             return jsonify({"status": "ignored"}), 200
 
-        # Skip if the triggering message is already an internal note (avoid loops)
         message_data = payload.get("data", {}).get("message") or payload.get("message", {})
         if message_data.get("channel") == "internal-note":
             logger.info("Skipping internal-note message on ticket %s.", ticket_id)
