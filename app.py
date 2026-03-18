@@ -1,7 +1,7 @@
 import os
 import logging
 import json
-from flask import Flask, request, jsonify, Response, session
+from flask import Flask, request, jsonify, Response
 from datetime import datetime
 import anthropic
 import requests
@@ -57,8 +57,6 @@ def fetch_tickets_for_report(limit=500):
         resp = requests.get(url, auth=gorgias_auth(), params={
             "limit": min(100, limit - len(all_tickets)),
             "page": page,
-            "order_by": "created_datetime",
-            "order_dir": "desc"
         }, timeout=30)
         resp.raise_for_status()
         data = resp.json()
@@ -252,14 +250,7 @@ def compute_report_stats(tickets):
     }
 
 def generate_claude_insights(stats, tickets):
-    sample = []
-    for t in tickets[:50]:
-        sample.append({
-            "subject": t.get("subject", ""),
-            "status": t.get("status", ""),
-            "created": t.get("created_datetime", "")
-        })
-
+    sample = [{"subject": t.get("subject", ""), "status": t.get("status", "")} for t in tickets[:50]]
     prompt = f"""You are a customer support analytics expert. Based on the following support ticket statistics, provide a concise executive summary with key insights and actionable recommendations.
 
 STATS:
@@ -270,7 +261,7 @@ STATS:
 - Top categories: {stats['categories'][:5]}
 - Agent workload: {stats['agents'][:5]}
 
-SAMPLE TICKET SUBJECTS (first 50):
+SAMPLE TICKET SUBJECTS:
 {json.dumps([t['subject'] for t in sample], indent=2)}
 
 Please provide:
@@ -302,7 +293,6 @@ def send_slack_report(stats, insights):
         f"• {name}: {data['assigned']} assigned, {data['closed']} closed"
         for name, data in stats["agents"][:5]
     ) or "No agent data available"
-
     short_insights = insights[:800] + "..." if len(insights) > 800 else insights
 
     payload = {
@@ -400,7 +390,7 @@ def render_report_html(stats, insights):
   tr:last-child td {{ border-bottom: none; }}
   .grid-2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }}
   .bar-row {{ display: flex; align-items: center; margin-bottom: 8px; font-size: 13px; }}
-  .bar-label {{ width: 80px; color: #666; flex-shrink: 0; }}
+  .bar-label {{ width: 90px; color: #666; flex-shrink: 0; }}
   .bar {{ background: #4f46e5; color: white; font-size: 11px; padding: 4px 8px; border-radius: 4px; min-width: 30px; }}
   .insights {{ background: #f0f4ff; border-left: 4px solid #4f46e5; padding: 20px; border-radius: 0 8px 8px 0; font-size: 14px; line-height: 1.7; }}
   .generated {{ text-align: center; color: #aaa; font-size: 12px; margin: 20px 0; }}
